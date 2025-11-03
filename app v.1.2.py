@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 from io import BytesIO
 import plotly.express as px
 import plotly.graph_objects as go
@@ -155,24 +156,29 @@ def add_kategori(df):
     return df
 
 def clean_reason_column(reason_str):
-    """Clean REASON column by removing number prefix and ' - SUFFIX' pattern"""
+    """Clean REASON column with refined number-prefix and suffix rules"""
     if pd.isna(reason_str):
         return reason_str
-    
+
     try:
         reason_str = str(reason_str).strip()
-        
-        # Remove suffix after ' - ' (like ' - DISRP', ' - TRNG', etc.)
+
+        # Hapus bagian setelah ' - '
         if ' - ' in reason_str:
             reason_str = reason_str.split(' - ')[0].strip()
-        
-        # Remove number prefix (including decimal) at the beginning
-        # Pattern: starts with optional digits, optional dot, optional digits, then dot
-        import re
-        # Remove pattern like "2.", "0.", "0.1 " at the start
-        reason_str = re.sub(r'^\d+\.(?:\d+\s+)?', '', reason_str).strip()
-        
-        return reason_str
+
+        # Jika diawali "0." atau "2." → hapus seluruh prefix
+        if re.match(r'^[0-9]+\.', reason_str):
+            # Kalau setelah titik ada satu digit lalu spasi → ambil digit tsb
+            # Contoh: "0.1 LANDING..." → ubah jadi "1 LANDING..."
+            if re.match(r'^[0-9]+\.[0-9]+\s+', reason_str):
+                reason_str = re.sub(r'^[0-9]+\.([0-9]+)\s+', r'\1 ', reason_str)
+            else:
+                # Contoh: "2.CHG ..." atau "0.CHG ..." → hapus semuanya
+                reason_str = re.sub(r'^[0-9]+\.\s*', '', reason_str)
+
+        return reason_str.strip()
+
     except:
         return reason_str
 
@@ -458,4 +464,5 @@ if st.session_state.df_processed is not None:
         )
 
 else:
+
     st.info("👈 Silakan upload file Excel di sidebar untuk memulai analisis")
