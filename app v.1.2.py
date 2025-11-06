@@ -466,3 +466,13 @@ if st.session_state.df_processed is not None:
 else:
 
     st.info("👈 Silakan upload file Excel di sidebar untuk memulai analisis")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #666; padding: 1rem;">
+    <p>Crew Roster Modification Log Analysis Tool</p>
+    <p><small>© Maurino Audrian Putra</small></p>
+</div>
+
+""", unsafe_allow_html=True)
