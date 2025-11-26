@@ -98,34 +98,38 @@ def add_std_local_time(df):
 
 def add_user_status(df):
     """Add User Status based on ADMIN_USER and ADMIN_ID codes"""
-    crew_training = {1135, 1136, 1143, 1157, 1181, 1302, 1304, 1305, 1308, 1309, 1310, 1204, 1206, 343}
-    crew_admin = {1200, 1201, 1202, 1203, 1205, 1207}
-    crew_control = {84116714, 'M14647', 82088093, 151122, 242334, 242332, 82120906, 82102045, 
-                    242333, 252000, 153009, 84122780, 240432, 240624, 241794, 240623, 134741, 
-                    82116818, 142686, 134744, 240431, 241796, 150283, 242342, 82099600, 241798, 
-                    240625, 242335, 84104580, 220260}
-    tracking = {84120306, 220515, 82104894, 240626, 252003, 251997, 252004, 252002, 84103500, 
-                242338, 242329, 221399, 240627, 84101641, 143516, 241797, 240628, 221027, 241793, 84120287, 240738}
+    crew_training = {83118188, 240951, 241140, 146829, 171915, 150292, 242339, 154327, 242344, 
+                     242340, 240168, 241432, 147875, 241435, 241482, 240952, 240953, 240954, 240957, 242328}
+    crew_control = {84116714, 'M14647', 82088093, 151122, 242334, 242332, 82120906, 82102045, 242333, 252000, 
+                    241441, 241169, 241198, 153009, 84122780, 240432, 242335, 241794, 240623, 134741, 82116818, 
+                    82104894, 134744, 240431, 241796, 150283, 242342, 82099600, 241798, 240723, 241162, 84104580, 
+                    220260, 252403, 241159}
+    tracking = {84120306, 220515, 240626, 252003, 251997, 252004, 240738, 84103500, 242338, 242329, 221399, 
+                240627, 84101641, 143516, 252002, 240628, 221027, 241797, 84120287}
     
-    def determine_status(admin_user, admin_id):
-        try:
-            # Try to convert to int for comparison
-            user_int = int(admin_user) if pd.notna(admin_user) else None
-            if user_int in crew_training:
-                return 'Crew Training'
-            if user_int in crew_admin:
-                return 'Crew Admin'
-        except:
-            pass
+    def determine_status(admin_id):
+        # try:
+        #     # Try to convert to int for comparison
+        #     user_int = int(admin_user) if pd.notna(admin_user) else None
+        #     if user_int in crew_training:
+        #         return 'Crew Training'
+        #     if user_int in crew_admin:
+        #         return 'Crew Admin'
+        # except:
+        #     pass
         
         try:
             admin_id_int = int(admin_id) if pd.notna(admin_id) else None
+            if admin_id_int in crew_training:
+                return 'Crew Training'
             if admin_id_int in crew_control:
                 return 'Crew Control'
             if admin_id_int in tracking:
                 return 'Tracking'
         except:
             try:
+                if admin_id in crew_training:
+                    return 'Crew Training'
                 if admin_id in crew_control:
                     return 'Crew Control'
                 if admin_id in tracking:
@@ -135,7 +139,7 @@ def add_user_status(df):
         
         return 'OTHER'
     
-    df['User Status'] = df.apply(lambda row: determine_status(row['ADMIN_USER'], row['ADMIN_ID']), axis=1)
+    df['User Status'] = df.apply(lambda row: determine_status(row['ADMIN_ID']), axis=1)
     return df
 
 def add_kategori(df):
@@ -144,14 +148,20 @@ def add_kategori(df):
         action_date = pd.to_datetime(row['ACTION TIME (CGK Time)']).date()
         std_date = pd.to_datetime(row['STD (Local Time)']).date()
         user_status = row['User Status']
-        
+
+        # Hitung selisih tanggal
+        selisih_hari = (std_date - action_date).days
+
+        # Logika kategori
         if action_date == std_date and user_status == 'Tracking':
             return 'ACTUAL'
+        elif action_date < std_date and user_status == 'Crew Control' and selisih_hari == 1:
+            return 'FINAL'
         elif action_date < std_date and user_status == 'Crew Control':
             return 'PLAN'
         else:
             return 'OTHER'
-    
+
     df['Kategori'] = df.apply(determine_kategori, axis=1)
     return df
 
@@ -323,7 +333,7 @@ if st.session_state.df_processed is not None:
     ]
     
     # Statistics & Metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
         st.metric("Total Records", len(df_filtered))
@@ -339,6 +349,9 @@ if st.session_state.df_processed is not None:
     with col5:
         plan = len(df_filtered[df_filtered['Kategori'] == 'PLAN'])
         st.metric("PLAN", plan)
+    with col6:
+        final = len(df_filtered[df_filtered['Kategori'] == 'FINAL'])
+        st.metric("FINAL", final)
     
     st.markdown("---")
     
@@ -458,7 +471,7 @@ if st.session_state.df_processed is not None:
         st.download_button(
             label="⬇️ Download Data Hasil Proses Lengkap",
             data=excel_file,
-            file_name=f"REASON_Analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            file_name=f"REASON_Analysis_NEW_CATEGORY_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
@@ -476,4 +489,3 @@ st.markdown("""
 </div>
 
 """, unsafe_allow_html=True)
-
