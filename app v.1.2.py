@@ -12,19 +12,40 @@ warnings.filterwarnings('ignore')
 # Page configuration
 st.set_page_config(page_title="REASON Analysis Dashboard", layout="wide", initial_sidebar_state="expanded")
 
-# Custom CSS
+# CSS untuk styling
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 20px;
+    .main-header {
+        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%);
+        padding: 1rem;
         border-radius: 10px;
-        margin: 10px 0;
+        color: white;
+        text-align: center;
+        margin-bottom: 2rem;
     }
-    .header-style {
-        color: #1f77b4;
-        font-size: 24px;
-        font-weight: bold;
+    .success-box {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
+    .error-box {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
+    .info-box {
+        background-color: #cce7ff;
+        border: 1px solid #99d5ff;
+        color: #004080;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -242,7 +263,13 @@ def to_excel(df):
 
 # ==================== MAIN APP ====================
 
-st.markdown("<h1 style='text-align: center; color: #1f77b4;'>📊 REASON Analysis Dashboard</h1>", unsafe_allow_html=True)
+# Header aplikasi
+st.markdown("""
+<div class="main-header">
+    <h1 style="color: white;">📊 REASON Modification Analysis </h1>
+    <p>Analyze Crew Roster Modification Log</p>
+</div>
+""", unsafe_allow_html=True)
 st.markdown("---")
 
 # Sidebar - File Upload
@@ -489,4 +516,5 @@ st.markdown("""
 </div>
 
 """, unsafe_allow_html=True)
+
 
