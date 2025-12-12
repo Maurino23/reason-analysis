@@ -223,7 +223,7 @@ def clean_data(df):
     df['REASON'] = df['REASON'].apply(clean_reason_column)
     
     # Remove duplicates based on specified columns
-    df = df.drop_duplicates(subset=['ID', 'NAME', 'REASON', 'ACTIVITY BEFORE', 'ACTIVITY AFTER'], keep='first')
+    df = df.drop_duplicates(subset=['ROSTER DATE', 'ID', 'NAME', 'REASON', 'ACTIVITY BEFORE', 'ACTIVITY AFTER'], keep='first')
     
     # Convert for date comparison
     df['ROSTER DATE'] = pd.to_datetime(df['ROSTER DATE'])
@@ -520,6 +520,7 @@ st.markdown("""
 </div>
 
 """, unsafe_allow_html=True)
+
 
 
 
