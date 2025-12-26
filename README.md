@@ -155,9 +155,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👨‍💻 Author
 
-**Your Name**
-- GitHub: [@yourusername](https://github.com/yourusername)
-- Email: your.email@example.com
+**Rino**
+- 📧 Email: [audrianmaurino@gmail.com]
+- 💼 LinkedIn: [Maurino Audrian Putra](https://www.linkedin.com/in/maurino-audrian-putra/)
+- 🐙 GitHub: [@maurino23](https://github.com/Maurino23)
+- ✨ Streamlit: [Maurino Audrian](https://share.streamlit.io/user/maurino23)
 
 ## 🙏 Acknowledgments
 
@@ -167,7 +169,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-For support, email your.email@example.com or open an issue in the repository.
+For support, email audrianmaurino@gmail.com or open an issue in the repository.
 
 ---
 
