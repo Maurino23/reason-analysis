@@ -6,15 +6,12 @@ import numpy as np
 import re
 from io import BytesIO
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
-# Page configuration
 st.set_page_config(page_title="REASON Analysis Dashboard", layout="wide", initial_sidebar_state="expanded")
 
-# CSS styling
 st.markdown("""
 <style>
     .main-header {
@@ -25,501 +22,464 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
     }
-    .success-box {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        color: #155724;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
+    .section-header {
+        background: linear-gradient(90deg, #2a5298 0%, #3a6bc2 100%);
+        padding: 0.6rem 1rem;
+        border-radius: 8px;
+        color: white;
+        margin-bottom: 1rem;
     }
-    .error-box {
-        background-color: #f8d7da;
-        border: 1px solid #f5c6cb;
-        color: #721c24;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
-    }
-    .info-box {
-        background-color: #cce7ff;
-        border: 1px solid #99d5ff;
-        color: #004080;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
+    .stat-card {
+        background-color: #f0f4ff;
+        border: 1px solid #c0d0f0;
+        border-radius: 8px;
+        padding: 0.8rem 1rem;
+        text-align: center;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== SECTION 2: HELPER FUNCTIONS ====================
+# ==================== SECTION 2: LOOKUP TABLE ====================
 
-def parse_admin_column(admin_str):
-    """Split ADMIN column into ADMIN_NAME, ADMIN_ID, and ADMIN_USER"""
-    if pd.isna(admin_str):
-        return None, None, None
-    try:
-        admin_str = str(admin_str).strip()
-        parts = admin_str.split(' - ')
-        if len(parts) < 2:
-            return admin_str, None, None
-        admin = parts[0].strip()
-        rest = parts[1].strip()
-        if '(' in rest and ')' in rest:
-            id_part = rest.split('(')[0].strip()
-            user_part = rest.split('(')[1].split(')')[0].strip()
-            return admin, id_part, user_part
-        else:
-            return admin, rest, None
-    except:
-        return admin_str, None, None
+_USER_STATUS_MAP = {}
+for _id in [83118188, 147875, 241140, 240952, 242340, 146829, 171915, 253028, 154327, 240623,
+            240951, 240624, 253044, 150292, 241162, 252404, 253048, 240957, 241434, 240168, 240625, 253031]:
+    _USER_STATUS_MAP[_id] = 'Crew Training'
+    _USER_STATUS_MAP[str(_id)] = 'Crew Training'
 
+for _id in [84116714, 'M14647', 82088093, 82120906, 242333, 253038, 153009, 241794, 241441, 82116818,
+            134744, 240432, 150283, 242334, 241169, 84104580, 252404, 151122, 82102045, 242332, 252000,
+            84122780, 242335, 240711, 134741, 240431, 242344, 82104894, 242342, 240723, 220260, 253045, 242047, 252403]:
+    _USER_STATUS_MAP[_id] = 'Crew Control'
+    if isinstance(_id, int):
+        _USER_STATUS_MAP[str(_id)] = 'Crew Control'
 
-def add_reason_status(df):
-    """Add Reason Status column"""
-    df['Reason Status'] = df['REASON'].apply(
-        lambda x: 'WITH REASON' if pd.notna(x) and str(x).strip() != '' else 'NO REASON'
+for _id in [84101641, 220515, 242338, 221027, 251997, 84120306, 142686, 240627, 84103500, 252003,
+            240628, 84120287, 143516, 242329, 252004, 240626, 221399, 241797, 240738, 252002, 241201, 260062, 260058]:
+    _USER_STATUS_MAP[_id] = 'Tracking'
+    _USER_STATUS_MAP[str(_id)] = 'Tracking'
+
+for _id in [84052867, 140108, 82119055, 150296, 151118, 135254, 147426, 142543]:
+    _USER_STATUS_MAP[_id] = 'Paxlist'
+    _USER_STATUS_MAP[str(_id)] = 'Paxlist'
+
+# ==================== SECTION 3: HELPER FUNCTIONS ====================
+
+def parse_admin_column_vectorized(series: pd.Series) -> pd.DataFrame:
+    s = series.astype(str).str.strip()
+    extracted = s.str.extract(
+        r'^(?P<ADMIN_NAME>[^-]+?)\s*-\s*(?P<ADMIN_ID>[^(]+?)(?:\s*\((?P<ADMIN_USER>[^)]+)\))?\s*$'
     )
+    no_match = extracted['ADMIN_NAME'].isna()
+    extracted.loc[no_match, 'ADMIN_NAME'] = s[no_match]
+    extracted = extracted.where(series.notna(), other=None)
+    extracted['ADMIN_ID']   = extracted['ADMIN_ID'].str.strip()
+    extracted['ADMIN_NAME'] = extracted['ADMIN_NAME'].str.strip()
+    extracted['ADMIN_USER'] = extracted['ADMIN_USER'].str.strip()
+    return extracted
+
+
+def add_reason_status(df: pd.DataFrame) -> pd.DataFrame:
+    mask = df['REASON'].notna() & (df['REASON'].astype(str).str.strip() != '')
+    df['Reason Status'] = np.where(mask, 'WITH REASON', 'NO REASON')
     return df
 
 
-def add_publish_status(df):
-    """Add Publish Status based on ROSTER DATE"""
-    def get_last_day_of_month(date):
-        if date.month == 12:
-            last_day = pd.Timestamp(year=date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
-        else:
-            last_day = pd.Timestamp(year=date.year, month=date.month + 1, day=1) - pd.Timedelta(days=1)
-        return last_day
-
-    df['Publish Status'] = df['ROSTER DATE'].apply(
-        lambda x: 'Belum Publish' if x >= get_last_day_of_month(x) else 'Sudah Publish'
-    )
+def add_std_local_time(df: pd.DataFrame) -> pd.DataFrame:
+    df['STD (Local Time)'] = pd.to_datetime(df['STD (UTC Time)'], errors='coerce') + pd.Timedelta(hours=7)
     return df
 
 
-def convert_utc_to_wib(utc_time):
-    """Convert UTC to WIB (UTC+7)"""
-    if pd.isna(utc_time):
-        return None
-    try:
-        if isinstance(utc_time, str):
-            utc_time = pd.to_datetime(utc_time)
-        wib_time = utc_time + pd.Timedelta(hours=7)
-        return wib_time
-    except:
-        return None
-
-
-def add_std_local_time(df):
-    """Add STD (Local Time) column"""
-    df['STD (Local Time)'] = df['STD (UTC Time)'].apply(convert_utc_to_wib)
-    return df
-
-# ==================== SECTION 3: USER STATUS & KATEGORI ====================
-
-def add_user_status(df):
-    """Add User Status based on ADMIN_ID codes"""
-    crew_training = {83118188, 147875, 241140, 240952, 242340, 146829, 171915, 253028, 154327, 240623,
-                     240951, 240624, 253044, 150292, 241162, 252404, 253048, 240957, 241434, 240168, 240625, 253031}
-    crew_control = {84116714, 'M14647', 82088093, 82120906, 242333, 253038, 153009, 241794, 241441, 82116818, 134744, 240432, 150283, 242334, 241169, 84104580, 252404,
-                    151122, 82102045, 242332, 252000, 84122780, 242335, 240711, 134741, 240431, 242344, 82104894, 242342, 240723, 220260, 253045, 242047, 252403}
-    tracking = {84101641, 220515, 242338, 221027, 251997, 84120306, 142686, 240627, 84103500, 252003,
-                240628, 84120287, 143516, 242329, 252004, 240626, 221399, 241797, 240738, 252002, 241201, 260062, 260058}
-    paxlist = {84052867, 140108, 82119055, 150296, 151118, 135254, 82119055, 147426, 142543}
-
-    def determine_status(admin_id):
-        try:
-            admin_id_int = int(admin_id) if pd.notna(admin_id) else None
-            if admin_id_int in crew_training:
-                return 'Crew Training'
-            if admin_id_int in crew_control:
-                return 'Crew Control'
-            if admin_id_int in tracking:
-                return 'Tracking'
-            if admin_id_int in paxlist:
-                return 'Paxlist'
-        except:
-            try:
-                if admin_id in crew_training:
-                    return 'Crew Training'
-                if admin_id in crew_control:
-                    return 'Crew Control'
-                if admin_id in tracking:
-                    return 'Tracking'
-                if admin_id in paxlist:
-                    return 'Paxlist'
-            except:
-                pass
-        return 'OTHER'
-
-    df['User Status'] = df.apply(lambda row: determine_status(row['ADMIN_ID']), axis=1)
+def add_user_status(df: pd.DataFrame) -> pd.DataFrame:
+    admin_id  = df['ADMIN_ID']
+    int_keys  = pd.to_numeric(admin_id, errors='coerce')
+    status    = int_keys.map(_USER_STATUS_MAP)
+    mask_un   = status.isna()
+    status[mask_un] = admin_id[mask_un].map(_USER_STATUS_MAP)
+    df['User Status'] = status.fillna('OTHER')
     return df
 
 
-def add_kategori(df):
-    """Add Kategori based on conditions"""
-    def determine_kategori(row):
-        try:
-            action_date = pd.to_datetime(row['ACTION TIME (CGK Time)']).date()
-            std_date = pd.to_datetime(row['STD (Local Time)']).date()
-            user_status = row['User Status']
-            selisih_hari = (std_date - action_date).days
-
-            if action_date == std_date and user_status == 'Tracking':
-                return 'ACTUAL'
-            elif action_date < std_date and user_status == 'Crew Control' and selisih_hari == 1:
-                return 'FINAL'
-            elif action_date < std_date and user_status == 'Crew Control':
-                return 'PLAN'
-            else:
-                return 'OTHER'
-        except:
-            return 'OTHER'
-
-    df['Kategori'] = df.apply(determine_kategori, axis=1)
-    return df
-
-# ==================== SECTION 4: CLEAN & STANDARDIZE ====================
-
-def standardize_action_time(df):
-    """Standardize ACTION TIME (CGK Time) from mixed text formats to uniform datetime"""
-
-    def parse_action_time(val):
-        if pd.isna(val):
-            return None
-
-        val = str(val).strip()
-
-        # Format 1: "12/17/2025 14:22" (MM/DD/YYYY HH:MM)
-        try:
-            return pd.to_datetime(val, format='%m/%d/%Y %H:%M')
-        except:
-            pass
-
-        # Format 2: "16-Dec-25 10:27" (DD-Mon-YY HH:MM)
-        try:
-            return pd.to_datetime(val, format='%d-%b-%y %H:%M')
-        except:
-            pass
-
-        # Fallback: biarkan pandas tebak sendiri
-        try:
-            return pd.to_datetime(val, dayfirst=False)
-        except:
-            return None
-
-    df['ACTION TIME (CGK Time)'] = df['ACTION TIME (CGK Time)'].apply(parse_action_time)
+def add_action_time_status(df: pd.DataFrame) -> pd.DataFrame:
+    action_date = pd.to_datetime(df['ACTION TIME (CGK Time)'], errors='coerce').dt.normalize()
+    std_date    = pd.to_datetime(df['STD (Local Time)'],        errors='coerce').dt.normalize()
+    delta       = (std_date - action_date).dt.days
+    conditions  = [delta == 0, delta == 1, delta == 2, delta == 3, delta > 3]
+    choices     = ['D-DAY', 'D-1', 'D-2', 'D-3', 'Before D-3']
+    df['Action Time Status'] = np.select(conditions, choices, default='OTHER')
     return df
 
 
-def clean_reason_column(reason_str):
-    """Clean REASON column with refined number-prefix and suffix rules"""
-    if pd.isna(reason_str):
-        return reason_str
-    try:
-        reason_str = str(reason_str).strip()
-        if ' - ' in reason_str:
-            reason_str = reason_str.split(' - ')[0].strip()
-        if re.match(r'^[0-9]+\.', reason_str):
-            if re.match(r'^[0-9]+\.[0-9]+\s+', reason_str):
-                reason_str = re.sub(r'^[0-9]+\.([0-9]+)\s+', r'\1 ', reason_str)
-            else:
-                reason_str = re.sub(r'^[0-9]+\.\s*', '', reason_str)
-        return reason_str.strip()
-    except:
-        return reason_str
-
-
-def clean_data(df):
-    """Clean data - dilakukan sebelum processing"""
-
-    # ✅ STEP BARU: Standardize ACTION TIME dulu sebelum apapun
-    df = standardize_action_time(df)
-
-    # Clean REASON column
-    df['REASON'] = df['REASON'].apply(clean_reason_column)
-
-    # Remove duplicates
-    df = df.drop_duplicates(
-        subset=['ROSTER DATE', 'ID', 'NAME', 'REASON', 'ACTIVITY BEFORE', 'ACTIVITY AFTER'],
-        keep='first'
-    )
-
-    # Convert date columns
-    df['ROSTER DATE'] = pd.to_datetime(df['ROSTER DATE'])
-    df['STD (UTC Time)'] = pd.to_datetime(df['STD (UTC Time)'])
-
-    # Temporarily convert STD UTC to local for date comparison
-    df['STD_TEMP'] = df['STD (UTC Time)'].apply(lambda x: convert_utc_to_wib(x))
-    df['ROSTER_DATE_ONLY'] = df['ROSTER DATE'].dt.date
-    df['STD_DATE_ONLY'] = df['STD_TEMP'].dt.date
-
-    # Remove rows where ROSTER DATE != STD (Local Time) date
-    df = df[df['ROSTER_DATE_ONLY'] == df['STD_DATE_ONLY']].copy()
-    df = df.drop(['STD_TEMP', 'ROSTER_DATE_ONLY', 'STD_DATE_ONLY'], axis=1)
-
+def standardize_action_time(df: pd.DataFrame) -> pd.DataFrame:
+    col  = df['ACTION TIME (CGK Time)'].astype(str).str.strip()
+    fmt1 = pd.to_datetime(col, format='%m/%d/%Y %H:%M', errors='coerce')
+    fmt2 = pd.to_datetime(col, format='%d-%b-%y %H:%M', errors='coerce')
+    fmt3 = pd.to_datetime(col, errors='coerce', dayfirst=False)
+    df['ACTION TIME (CGK Time)'] = fmt1.fillna(fmt2).fillna(fmt3)
     return df
 
 
-def process_data(df):
-    """Process data - dilakukan setelah cleaning"""
-    admin_split = df['ADMIN'].apply(lambda x: pd.Series(parse_admin_column(x)))
-    df['ADMIN_NAME'] = admin_split[0]
-    df['ADMIN_ID'] = admin_split[1]
-    df['ADMIN_USER'] = admin_split[2]
-
-    df = add_reason_status(df)
-    df = add_publish_status(df)
-    df = add_std_local_time(df)
-    df = add_user_status(df)
-    df = add_kategori(df)
-
-    return df
+def clean_reason_column_vectorized(series: pd.Series) -> pd.Series:
+    s = series.astype(str).str.strip()
+    s = s.str.split(' - ').str[0].str.strip()
+    s = s.str.replace(r'^(\d+)\.(\d+)\s+', r'\2 ', regex=True)
+    s = s.str.replace(r'^(\d+)\.\s*', '', regex=True)
+    s = s.str.strip()
+    return s.where(series.notna(), other=np.nan)
 
 
-def to_excel(df):
-    """Convert DataFrame to Excel"""
+def to_excel(df: pd.DataFrame) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Data')
     output.seek(0)
     return output
 
-# ==================== SECTION 5: MAIN APP - HEADER & UPLOAD ====================
 
-# Header
+# ==================== SECTION 4: CORE PROCESSING (CACHED) ====================
+
+@st.cache_data(show_spinner=False)
+def clean_and_process(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Run full clean + process pipeline.
+    Returns (df_cleaned, df_processed).
+    Cached — only reruns when input DataFrame changes.
+    """
+    # --- CLEAN ---
+    df = standardize_action_time(df)
+    df['REASON'] = clean_reason_column_vectorized(df['REASON'])
+    df = df.drop_duplicates(
+        subset=['ROSTER DATE', 'ID', 'NAME', 'REASON', 'ACTIVITY BEFORE', 'ACTIVITY AFTER'],
+        keep='last'
+    )
+    df['ROSTER DATE']    = pd.to_datetime(df['ROSTER DATE'],    errors='coerce')
+    df['STD (UTC Time)'] = pd.to_datetime(df['STD (UTC Time)'], errors='coerce')
+    std_local = df['STD (UTC Time)'] + pd.Timedelta(hours=7)
+    df = df[df['ROSTER DATE'].dt.date == std_local.dt.date].copy()
+    df_cleaned = df.copy()
+
+    # --- PROCESS ---
+    admin_parsed     = parse_admin_column_vectorized(df['ADMIN'])
+    df['ADMIN_NAME'] = admin_parsed['ADMIN_NAME'].values
+    df['ADMIN_ID']   = admin_parsed['ADMIN_ID'].values
+    df['ADMIN_USER'] = admin_parsed['ADMIN_USER'].values
+    df = add_reason_status(df)
+    df = add_std_local_time(df)
+    df = add_user_status(df)
+    df = add_action_time_status(df)
+    df_processed = df.copy()
+
+    return df_cleaned, df_processed
+
+
+# ==================== SECTION 5: SESSION STATE INIT ====================
+
+for key in ('df_combined', 'df_cleaned', 'df_processed'):
+    if key not in st.session_state:
+        st.session_state[key] = None
+
+# ==================== SECTION 6: SIDEBAR NAVIGATION ====================
+
+st.sidebar.markdown("""
+<div style="text-align:center; padding: 0.5rem 0 1rem 0;">
+    <span style="font-size:1.4rem; font-weight:700; color:#1e3c72;">📊 REASON Analysis</span>
+</div>
+""", unsafe_allow_html=True)
+
+menu = st.sidebar.radio(
+    "Navigasi Menu",
+    options=["📂 Menu 1 — Gabung File", "⚙️ Menu 2 — Cleaning & Analisis"],
+    index=0
+)
+
+st.sidebar.markdown("---")
+
+# ==================== SECTION 7: HEADER ====================
+
 st.markdown("""
 <div class="main-header">
     <h1 style="color: white;">📊 REASON Modification Analysis</h1>
     <p>Analyze Crew Roster Modification Log</p>
 </div>
 """, unsafe_allow_html=True)
-st.markdown("---")
 
-# Sidebar - File Upload
-with st.sidebar:
-    st.header("📁 File Management")
-    num_files = st.number_input("Jumlah file Excel yang ingin digabungkan:", min_value=1, max_value=10, value=1)
+# ====================================================================================
+# MENU 1 — GABUNG FILE
+# ====================================================================================
 
-    uploaded_files = []
-    for i in range(num_files):
-        uploaded_file = st.file_uploader(f"Upload file {i+1}:", type="xlsx", key=f"file_{i}")
-        if uploaded_file:
-            uploaded_files.append(uploaded_file)
+if menu == "📂 Menu 1 — Gabung File":
 
-    process_button = st.button("🔄 Proses Data", use_container_width=True)
+    st.markdown('<div class="section-header"><h3 style="margin:0; color:white;">📂 Menu 1 — Gabung File Excel</h3></div>', unsafe_allow_html=True)
+    st.write("Gabungkan satu atau lebih file Excel menjadi satu dataset. Hasil gabungan dapat dipreview dan didownload, atau langsung dilanjutkan ke Menu 2.")
 
-# Initialize session state
-if 'df_combined' not in st.session_state:
-    st.session_state.df_combined = None
-if 'df_cleaned' not in st.session_state:
-    st.session_state.df_cleaned = None
-if 'df_processed' not in st.session_state:
-    st.session_state.df_processed = None
+    # --- Upload ---
+    with st.sidebar:
+        st.header("📁 Upload File")
+        num_files = st.number_input("Jumlah file:", min_value=1, max_value=10, value=1)
+        uploaded_files = []
+        for i in range(num_files):
+            f = st.file_uploader(f"File {i+1}:", type="xlsx", key=f"m1_file_{i}")
+            if f:
+                uploaded_files.append(f)
+        gabung_button = st.button("🔗 Gabungkan File", use_container_width=True)
 
-# Process files
-if process_button and uploaded_files:
-    with st.spinner("⏳ Memproses data..."):
-        try:
-            st.info("📊 Step 1/3: Menggabungkan file...")
-            dfs = [pd.read_excel(file) for file in uploaded_files]
-            st.session_state.df_combined = pd.concat(dfs, ignore_index=True)
-            st.success("✅ File berhasil digabungkan!")
+    # --- Process ---
+    if gabung_button:
+        if not uploaded_files:
+            st.warning("⚠️ Belum ada file yang diupload.")
+        else:
+            with st.spinner("⏳ Menggabungkan file..."):
+                try:
+                    dfs = [pd.read_excel(f) for f in uploaded_files]
+                    combined = pd.concat(dfs, ignore_index=True)
+                    st.session_state.df_combined = combined
+                    # Reset downstream hasil agar Menu 2 tahu data berubah
+                    st.session_state.df_cleaned   = None
+                    st.session_state.df_processed = None
+                    st.success(f"✅ {len(uploaded_files)} file berhasil digabungkan!")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
 
-            st.info("🧹 Step 2/3: Membersihkan data...")
-            st.session_state.df_cleaned = clean_data(st.session_state.df_combined.copy())
-            st.success("✅ Data berhasil dibersihkan!")
+    # --- Tampilkan hasil jika sudah ada ---
+    if st.session_state.df_combined is not None:
+        df_combined = st.session_state.df_combined
 
-            st.info("⚙️ Step 3/3: Memproses data otomatis...")
-            st.session_state.df_processed = process_data(st.session_state.df_cleaned.copy())
-            st.success("✅ Data berhasil diproses!")
+        st.markdown("---")
 
-            st.markdown("---")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Data Gabungan", len(st.session_state.df_combined))
-            with col2:
-                st.metric("Setelah Dibersihkan", len(st.session_state.df_cleaned))
-            with col3:
-                st.metric("Duplikat Dihapus", len(st.session_state.df_combined) - len(st.session_state.df_cleaned))
-            st.markdown("---")
+        # Statistik ringkas
+        st.subheader("📊 Statistik Hasil Gabungan")
+        dupes = df_combined.duplicated(
+            subset=['ROSTER DATE', 'ID', 'NAME', 'REASON', 'ACTIVITY BEFORE', 'ACTIVITY AFTER']
+        ).sum()
 
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Baris",    f"{len(df_combined):,}")
+        c2.metric("Total Kolom",    len(df_combined.columns))
+        c3.metric("Potensi Duplikat", f"{dupes:,}")
+        c4.metric("File Digabung",  len(uploaded_files) if uploaded_files else "—")
 
-# ==================== SECTION 6: FILTERS & METRICS ====================
+        st.markdown("---")
 
-if st.session_state.df_processed is not None:
-    df_processed = st.session_state.df_processed
+        # Preview tabel
+        st.subheader("👁️ Preview Data Gabungan")
+        st.caption(f"Menampilkan 100 baris pertama dari {len(df_combined):,} baris total.")
+        st.dataframe(df_combined.head(100), use_container_width=True, height=400)
 
-    # Sidebar Filters
-    st.sidebar.markdown("---")
-    st.sidebar.header("🔍 Filter Data")
+        st.markdown("---")
 
-    companies = df_processed['COMPANY'].unique()
-    selected_companies = st.sidebar.multiselect("COMPANY:", companies, default=companies)
+        # Download
+        st.subheader("📥 Download Hasil Gabungan")
+        col_dl, col_info = st.columns([1, 2])
+        with col_dl:
+            st.download_button(
+                label="⬇️ Download Gabungan (.xlsx)",
+                data=to_excel(df_combined),
+                file_name=f"REASON_Gabungan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        with col_info:
+            st.info("💡 Data ini sudah tersimpan di sesi. Pindah ke **Menu 2** untuk melanjutkan proses cleaning & analisis tanpa perlu upload ulang.")
 
-    kategori_list = df_processed['Kategori'].unique()
-    selected_kategori = st.sidebar.multiselect("Kategori:", kategori_list, default=kategori_list)
+    else:
+        st.info("👈 Upload file Excel di sidebar, lalu klik **Gabungkan File**.")
 
-    user_status_list = df_processed['User Status'].unique()
-    selected_user_status = st.sidebar.multiselect("User Status:", user_status_list, default=user_status_list)
 
-    reason_status_list = df_processed['Reason Status'].unique()
-    selected_reason_status = st.sidebar.multiselect("Reason Status:", reason_status_list, default=reason_status_list)
+# ====================================================================================
+# MENU 2 — CLEANING & ANALISIS
+# ====================================================================================
 
-    publish_status_list = df_processed['Publish Status'].unique()
-    selected_publish_status = st.sidebar.multiselect("Publish Status:", publish_status_list, default=publish_status_list)
+elif menu == "⚙️ Menu 2 — Cleaning & Analisis":
 
-    # Apply filters
-    df_filtered = df_processed[
-        (df_processed['COMPANY'].isin(selected_companies)) &
-        (df_processed['Kategori'].isin(selected_kategori)) &
-        (df_processed['User Status'].isin(selected_user_status)) &
-        (df_processed['Reason Status'].isin(selected_reason_status)) &
-        (df_processed['Publish Status'].isin(selected_publish_status))
-    ]
+    st.markdown('<div class="section-header"><h3 style="margin:0; color:white;">⚙️ Menu 2 — Cleaning & Analisis</h3></div>', unsafe_allow_html=True)
 
-    # Metrics
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-    with col1:
-        st.metric("Total Records", len(df_filtered))
-    with col2:
-        with_reason = len(df_filtered[df_filtered['Reason Status'] == 'WITH REASON'])
-        st.metric("With Reason", with_reason)
-    with col3:
-        no_reason = len(df_filtered[df_filtered['Reason Status'] == 'NO REASON'])
-        st.metric("No Reason", no_reason)
-    with col4:
-        actual = len(df_filtered[df_filtered['Kategori'] == 'ACTUAL'])
-        st.metric("ACTUAL", actual)
-    with col5:
-        plan = len(df_filtered[df_filtered['Kategori'] == 'PLAN'])
-        st.metric("PLAN", plan)
-    with col6:
-        final = len(df_filtered[df_filtered['Kategori'] == 'FINAL'])
-        st.metric("FINAL", final)
+    # --- Sumber data: dari Menu 1 atau upload baru ---
+    with st.sidebar:
+        st.header("📁 Sumber Data")
 
-    st.markdown("---")
+        if st.session_state.df_combined is not None:
+            sumber = st.radio(
+                "Gunakan data dari:",
+                options=["✅ Hasil Menu 1 (sudah digabung)", "📤 Upload file baru"],
+                index=0,
+                key="m2_sumber"
+            )
+        else:
+            sumber = "📤 Upload file baru"
+            st.info("Belum ada data dari Menu 1. Silakan upload file di bawah.")
 
-# ==================== SECTION 7: VISUALIZATIONS, TABLES & DOWNLOAD ====================
+        # Upload baru jika dipilih
+        m2_uploaded = None
+        if sumber == "📤 Upload file baru":
+            num_files_m2 = st.number_input("Jumlah file:", min_value=1, max_value=10, value=1, key="m2_num")
+            m2_files = []
+            for i in range(num_files_m2):
+                f = st.file_uploader(f"File {i+1}:", type="xlsx", key=f"m2_file_{i}")
+                if f:
+                    m2_files.append(f)
+            if m2_files:
+                m2_uploaded = m2_files
 
-    # Visualizations
-    col_left, col_right = st.columns(2)
+        proses_button = st.button("🔄 Proses Data", use_container_width=True)
 
-    with col_left:
-        st.subheader("📊 Distribusi REASON")
-        reason_counts = df_filtered['Reason Status'].value_counts()
-        fig_reason = px.pie(
-            values=reason_counts.values,
-            names=reason_counts.index,
-            title="Reason Status Distribution",
-            color_discrete_sequence=px.colors.sequential.RdBu
+    # --- Tentukan DataFrame input ---
+    if proses_button:
+        with st.spinner("⏳ Memproses data..."):
+            try:
+                # Ambil sumber data
+                if sumber == "✅ Hasil Menu 1 (sudah digabung)":
+                    df_input = st.session_state.df_combined.copy()
+                    st.info(f"📊 Menggunakan data dari Menu 1 ({len(df_input):,} baris).")
+                else:
+                    if not m2_uploaded:
+                        st.warning("⚠️ Belum ada file yang diupload.")
+                        st.stop()
+                    dfs = [pd.read_excel(f) for f in m2_uploaded]
+                    df_input = pd.concat(dfs, ignore_index=True)
+                    st.info(f"📊 Menggabungkan {len(m2_uploaded)} file ({len(df_input):,} baris).")
+
+                # Jalankan pipeline (cached)
+                df_cleaned, df_processed = clean_and_process(df_input)
+                st.session_state.df_cleaned   = df_cleaned
+                st.session_state.df_processed = df_processed
+
+                # Ringkasan proses
+                removed = len(df_input) - len(df_cleaned)
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Data Masuk",      f"{len(df_input):,}")
+                c2.metric("Setelah Cleaning", f"{len(df_cleaned):,}")
+                c3.metric("Baris Dihapus",    f"{removed:,}")
+                st.success("✅ Data berhasil diproses!")
+
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
+
+    # --- Tampilkan analisis jika sudah ada hasil ---
+    if st.session_state.df_processed is not None:
+        df_processed = st.session_state.df_processed
+
+        st.markdown("---")
+
+        # --- Filter ---
+        st.sidebar.markdown("---")
+        st.sidebar.header("🔍 Filter Data")
+
+        companies          = df_processed['COMPANY'].unique()
+        ats_list           = df_processed['Action Time Status'].unique()
+        us_list            = df_processed['User Status'].unique()
+        rs_list            = df_processed['Reason Status'].unique()
+
+        sel_companies = st.sidebar.multiselect("COMPANY:",            companies, default=companies)
+        sel_ats       = st.sidebar.multiselect("Action Time Status:", ats_list,  default=ats_list)
+        sel_us        = st.sidebar.multiselect("User Status:",        us_list,   default=us_list)
+        sel_rs        = st.sidebar.multiselect("Reason Status:",      rs_list,   default=rs_list)
+
+        mask = (
+            df_processed['COMPANY'].isin(sel_companies) &
+            df_processed['Action Time Status'].isin(sel_ats) &
+            df_processed['User Status'].isin(sel_us) &
+            df_processed['Reason Status'].isin(sel_rs)
         )
-        fig_reason.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_reason, use_container_width=True)
+        df_filtered = df_processed[mask]
 
-    with col_right:
-        st.subheader("📈 Distribusi Kategori")
-        kategori_counts = df_filtered['Kategori'].value_counts()
-        fig_kategori = px.bar(
-            x=kategori_counts.index,
-            y=kategori_counts.values,
-            title="Kategori Distribution",
-            labels={'x': 'Kategori', 'y': 'Count'},
-            color=kategori_counts.index,
-            color_discrete_sequence=px.colors.qualitative.Set2
-        )
-        fig_kategori.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_kategori, use_container_width=True)
+        # --- Metrics ---
+        rs  = df_filtered['Reason Status']
+        ats = df_filtered['Action Time Status']
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Total Records", f"{len(df_filtered):,}")
+        c2.metric("With Reason",   f"{(rs  == 'WITH REASON').sum():,}")
+        c3.metric("No Reason",     f"{(rs  == 'NO REASON').sum():,}")
+        c4.metric("D-DAY",         f"{(ats == 'D-DAY').sum():,}")
+        c5.metric("D-1",           f"{(ats == 'D-1').sum():,}")
+        c6.metric("D-3",           f"{(ats == 'D-3').sum():,}")
 
-    col_left2, col_right2 = st.columns(2)
+        st.markdown("---")
 
-    with col_left2:
-        st.subheader("🔤 Top 5 REASON")
-        reason_breakdown = df_filtered['REASON'].value_counts().head(5).sort_values(ascending=True)
-        reason_percentage = (reason_breakdown / reason_breakdown.sum() * 100).round(2)
-        fig_reason_breakdown = px.bar(
-            x=reason_percentage.values,
-            y=reason_percentage.index,
-            orientation='h',
-            title="Top 5 REASON (%)",
-            labels={'x': 'Percentage (%)', 'y': 'REASON'},
-            text=reason_percentage.values
-        )
-        fig_reason_breakdown.update_traces(textposition='outside', texttemplate='%{text:.2f}%')
-        fig_reason_breakdown.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_reason_breakdown, use_container_width=True)
+        # --- Visualisasi ---
+        col_l, col_r = st.columns(2)
 
-    with col_right2:
-        st.subheader("👥 User Status Distribution")
-        user_status_counts = df_filtered['User Status'].value_counts()
-        fig_user_status = px.bar(
-            x=user_status_counts.index,
-            y=user_status_counts.values,
-            title="User Status Distribution",
-            labels={'x': 'User Status', 'y': 'Count'},
-            color=user_status_counts.index,
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-        fig_user_status.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_user_status, use_container_width=True)
+        with col_l:
+            st.subheader("📊 Distribusi Reason Status")
+            rc = df_filtered['Reason Status'].value_counts()
+            fig = px.pie(values=rc.values, names=rc.index,
+                         title="Reason Status Distribution",
+                         color_discrete_sequence=px.colors.sequential.RdBu)
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("---")
+        with col_r:
+            st.subheader("📈 Distribusi Action Time Status")
+            ac = df_filtered['Action Time Status'].value_counts()
+            fig = px.bar(x=ac.index, y=ac.values,
+                         title="Action Time Status Distribution",
+                         labels={'x': 'Action Time Status', 'y': 'Count'},
+                         color=ac.index,
+                         color_discrete_sequence=px.colors.qualitative.Set2)
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
 
-    # Detailed Statistics Table
-    st.subheader("📋 Statistik Detail berdasarkan REASON")
-    reason_stats = df_filtered.groupby('REASON').agg({
-        'ID': 'count',
-        'Kategori': lambda x: (x == 'ACTUAL').sum(),
-        'User Status': lambda x: (x == 'Crew Control').sum()
-    }).rename(columns={'ID': 'Total', 'Kategori': 'ACTUAL Count', 'User Status': 'Crew Control Count'})
-    reason_stats['Percentage'] = (reason_stats['Total'] / reason_stats['Total'].sum() * 100).round(2)
-    reason_stats = reason_stats.sort_values('Total', ascending=False)
-    st.dataframe(reason_stats, use_container_width=True)
+        col_l2, col_r2 = st.columns(2)
 
-    st.markdown("---")
+        with col_l2:
+            st.subheader("🔤 Top 5 REASON")
+            rb = df_filtered['REASON'].value_counts().head(5).sort_values(ascending=True)
+            rp = (rb / rb.sum() * 100).round(2)
+            fig = px.bar(x=rp.values, y=rp.index, orientation='h',
+                         title="Top 5 REASON (%)",
+                         labels={'x': 'Percentage (%)', 'y': 'REASON'},
+                         text=rp.values)
+            fig.update_traces(textposition='outside', texttemplate='%{text:.2f}%')
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
 
-    # Detail Data Table
-    st.subheader("📑 Detail Data")
-    display_columns = ['ID', 'NAME', 'COMPANY', 'ROSTER DATE', 'ACTIVITY', 'REASON',
-                       'STD (Local Time)', 'ACTION TIME (CGK Time)', 'User Status',
-                       'Kategori', 'Reason Status', 'Publish Status']
-    available_columns = [col for col in display_columns if col in df_filtered.columns]
-    df_display = df_filtered[available_columns].copy()
-    st.dataframe(df_display, use_container_width=True, height=400)
+        with col_r2:
+            st.subheader("👥 User Status Distribution")
+            uc = df_filtered['User Status'].value_counts()
+            fig = px.bar(x=uc.index, y=uc.values,
+                         title="User Status Distribution",
+                         labels={'x': 'User Status', 'y': 'Count'},
+                         color=uc.index,
+                         color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # Download
-    st.subheader("📥 Download Data")
-    col_down1, col_down2 = st.columns(2)
+        # --- Detail Data ---
+        st.subheader("📑 Detail Data")
+        display_cols = ['ID', 'NAME', 'COMPANY', 'ROSTER DATE', 'ACTIVITY', 'REASON',
+                        'STD (Local Time)', 'ACTION TIME (CGK Time)', 'User Status',
+                        'Action Time Status', 'ADMIN']
+        avail_cols = [c for c in display_cols if c in df_filtered.columns]
+        st.dataframe(df_filtered[avail_cols], use_container_width=True, height=400)
 
-    with col_down1:
-        excel_cleaned = to_excel(st.session_state.df_cleaned)
-        st.download_button(
-            label="⬇️ Download Data Dibersihkan",
-            data=excel_cleaned,
-            file_name=f"REASON_Data_Dibersihkan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+        st.markdown("---")
 
-    with col_down2:
-        excel_file = to_excel(df_filtered)
-        st.download_button(
-            label="⬇️ Download Data Hasil Proses Lengkap",
-            data=excel_file,
-            file_name=f"REASON_Analysis_NEW_CATEGORY_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+        # --- Download ---
+        st.subheader("📥 Download Data")
+        cd1, cd2 = st.columns(2)
+        with cd1:
+            st.download_button(
+                label="⬇️ Download Data Cleaned",
+                data=to_excel(st.session_state.df_cleaned),
+                file_name=f"REASON_Cleaned_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        with cd2:
+            st.download_button(
+                label="⬇️ Download Data Hasil Analisis",
+                data=to_excel(df_filtered),
+                file_name=f"REASON_Analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
 
-else:
-    st.info("👈 Silakan upload file Excel di sidebar untuk memulai analisis")
+    else:
+        st.info("👈 Pilih sumber data di sidebar, lalu klik **Proses Data** untuk memulai analisis.")
 
-# Footer
+# ==================== FOOTER ====================
+
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 1rem;">
@@ -527,4 +487,3 @@ st.markdown("""
     <p><small>© Maurino Audrian Putra</small></p>
 </div>
 """, unsafe_allow_html=True)
-
