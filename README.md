@@ -38,6 +38,15 @@ Interactive web application for analyzing REASON data with automated data proces
 - **Detailed Statistics**: Comprehensive breakdown by REASON with percentages
 - **Data Table**: Interactive table with all processed data
 
+### Ringkasan
+
+| Keterangan              | Gabungan | Cleaned | Hasil Analisis |
+|-------------------------|----------|---------|----------------|
+| Data mentah             | ✅       | ❌      | ❌             |
+| Sudah dibersihkan       | ❌       | ✅      | ✅             |
+| Ada kolom tambahan      | ❌       | ❌      | ✅             |
+| Ikut filter sidebar     | ❌       | ❌      | ✅             |
+
 ### 📥 Export Options
 - **Download Cleaned Data**: Get lightweight file with duplicates removed
 - **Download Full Processed Data**: Complete dataset with all new columns
