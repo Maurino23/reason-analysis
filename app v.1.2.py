@@ -150,7 +150,7 @@ def clean_and_process(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df['REASON'] = clean_reason_column_vectorized(df['REASON'])
     df = df.drop_duplicates(
         subset=['ROSTER DATE', 'ID', 'NAME', 'REASON', 'ACTIVITY BEFORE', 'ACTIVITY AFTER'],
-        keep='last'
+        keep='first'
     )
     df['ROSTER DATE']    = pd.to_datetime(df['ROSTER DATE'],    errors='coerce')
     df['STD (UTC Time)'] = pd.to_datetime(df['STD (UTC Time)'], errors='coerce')
@@ -487,3 +487,4 @@ st.markdown("""
     <p><small>© Maurino Audrian Putra</small></p>
 </div>
 """, unsafe_allow_html=True)
+
